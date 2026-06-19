@@ -1,26 +1,38 @@
 #!/system/bin/sh
-# 极其保守的开机等待 50 秒，等澎湃的所有底层服务全部握手完毕
-sleep 50
+# Fuck 60Hz - 究极绝对死锁安全版
 
-lock_refresh_rate() {
-    # 调高脚本优先级，确保弱网/高负载下依然准时执行
-    renice -n -10 $$
+# 1. 开机双重安全延迟（防 Bootloop 锁死）
+sleep 15
+while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 3; done
+while [ -z "$(settings get system screen_refresh_rate 2>/dev/null)" ]; do sleep 3; done
+sleep 5
 
-    while true; do
-        # 1. 纯内存级别的数据库写入（安全，绝不触发服务死锁）
-        settings put system peak_refresh_rate 120.0 >/dev/null 2>&1
-        settings put system min_refresh_rate 120.0 >/dev/null 2>&1
-        settings put secure user_refresh_rate 120 >/dev/null 2>&1
-        settings put system match_content_frame_rate 0 >/dev/null 2>&1
-        
-        # 2. 核心：直接用小米自己的温控控制键去打败它
-        # 很多时候系统跳 60 只是因为这一项被改成了 60，我们每 0.5 秒把它洗脑成 120
-        settings put system thermal_refresh_rate_limit 120 >/dev/null 2>&1
+# ==================== 铁腕锁死逻辑开始 ====================
 
-        # 3. 0.5秒高频洗脑数据库，不涉及硬件层重构，绝对不会卡死死机
-        sleep 0.5
-    done
-}
+# 2. 物理分辨率与帧率硬死锁 (WindowManager 级别)
+# 直接用窗口管理器把物理显示的天花板和地板全部焊死在 120
+wm refresh-rate 120.0 2>/dev/null
 
-# 异步丢入后台运行
-lock_refresh_rate &
+# 进入地毯式、高频洗脑循环
+while true; do
+    # 3. 剥离图形渲染器 (SurfaceFlinger) 的温控与低电量限速
+    # 强制让渲染器只认 120Hz
+    service call SurfaceFlinger 1035 i32 1 >/dev/null 2>&1  # 针对部分老机型的渲染器锁定
+    
+    # 4. 暴力注入显示系统 (Display Service)
+    # 强行下发 Mode ID 2（通常是 120Hz 的物理显示硬编码）
+    service call display 1 i32 2 >/dev/null 2>&1
+    service call display 5 i32 2 >/dev/null 2>&1 # 某些魔改类原生系统的备用 display 通道
+    
+    # 5. 封死 Settings 数据库中的全量刷新率参数
+    settings put system min_refresh_rate 120.0
+    settings put system peak_refresh_rate 120.0
+    settings put system screen_refresh_rate 120
+    
+    # 6. 碾碎低电量省电模式的触发几率
+    settings put global low_power_trigger_level 0
+    settings put global low_power 0 # 强行关闭已经触发的省电模式状态
+    
+    # 7. 极致对抗：每隔 1.5 秒暴力洗脑一次
+    sleep 1.5
+done
