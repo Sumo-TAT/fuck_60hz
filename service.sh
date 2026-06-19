@@ -1,28 +1,24 @@
 #!/system/bin/sh
-# 极其保守的开机等待，安全第一（延长到 40 秒，确保所有核心服务死透了再启动）
-sleep 40
+# 极其保守的开机等待 50 秒，等澎湃的所有底层服务全部握手完毕
+sleep 50
 
 lock_refresh_rate() {
-    # 安全锁：确保系统完全起来后，只在后台低调执行合法的 Settings 写入
+    # 调高脚本优先级，确保弱网/高负载下依然准时执行
+    renice -n -10 $$
+
     while true; do
-        # 1. 锁死全局与最高/最低刷新率
+        # 1. 纯内存级别的数据库写入（安全，绝不触发服务死锁）
         settings put system peak_refresh_rate 120.0 >/dev/null 2>&1
         settings put system min_refresh_rate 120.0 >/dev/null 2>&1
         settings put secure user_refresh_rate 120 >/dev/null 2>&1
-        
-        # 2. 核心安全锁：强行关闭“根据内容和温控动态匹配帧率”机制 (0 代表永远不匹配降频)
-        # 这一行能极大程度缓解温控导致的 120 和 60 来回乱跳
         settings put system match_content_frame_rate 0 >/dev/null 2>&1
+        
+        # 2. 核心：直接用小米自己的温控控制键去打败它
+        # 很多时候系统跳 60 只是因为这一项被改成了 60，我们每 0.5 秒把它洗脑成 120
+        settings put system thermal_refresh_rate_limit 120 >/dev/null 2>&1
 
-        # 3. 拦截物理降频 (不调分辨率，只调 Mode ID，安全且不伤显示通道)
-        CURRENT_MODE=$(dumpsys display | grep -E "mActiveDisplayModeId|mActiveModeId" | head -n 1 | grep -oE "[0-9]+")
-        if [ "$CURRENT_MODE" = "1" ]; then
-            # 只有当发现物理 Mode 真的跌回 1 时，才使用 cmd display 顶回去
-            cmd display set-display-mode-id 2 >/dev/null 2>&1
-        fi
-
-        # 保持 3 秒一次的监控步长，既兼顾了响应速度，又避免了短时间密集调用卡死 CPU
-        sleep 3
+        # 3. 0.5秒高频洗脑数据库，不涉及硬件层重构，绝对不会卡死死机
+        sleep 0.5
     done
 }
 
