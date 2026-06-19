@@ -1,0 +1,6 @@
+id=fuck_60hz
+name=去你大爷的60hz
+version=v1.0
+versionCode=1
+author=Github@Sumo-TAT
+description=通过后台异步循环脚本，强制 120Hz，防止撒比澎湃锁60Hz。
